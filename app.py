@@ -87,7 +87,7 @@ def get_azure_llm():
             
         return AzureChatOpenAI(
             azure_endpoint=endpoint,
-            azure_deployment="gpt35", # <-- 請確保這裡的部署名稱與你們在 Azure 上的精確名稱一致
+            azure_deployment="gpt-5.4", # <-- 請確保這裡的部署名稱與你們在 Azure 上的精確名稱一致
             openai_api_key=key,
             openai_api_version=version,
             temperature=0.3
