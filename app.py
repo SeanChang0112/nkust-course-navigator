@@ -1,4 +1,3 @@
-%%writefile app.py
 import os
 import streamlit as st
 from langchain_openai import AzureChatOpenAI
