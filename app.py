@@ -129,7 +129,7 @@ NKUST_DEPARTMENTS = {
 # 4. UI 介面佈局與資料初始化
 # =====================================================================
 st.set_page_config(page_title="高科大不分系選課導航", layout="wide", page_icon="🎓")
-st.title("🎓 高瞻科技不分系選課導航家 (雲端永久運行版)")
+st.title("🎓 高瞻科技不分系選課導航家")
 
 # 在最外層目錄建立索引
 file_index = build_department_index()
