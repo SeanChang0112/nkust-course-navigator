@@ -4,27 +4,25 @@ from langchain_openai import AzureChatOpenAI
 import PyPDF2
 
 # =====================================================================
-# 1. 核心優化：建立全域檔案快取索引 (RAG 速度提升 100 倍的關鍵)
+# 1. 核心功能：直接讀取 GitHub 專案內隨附的 PDF 規範檔案 (免掛載雲端硬碟)
 # =====================================================================
 
 @st.cache_data(show_spinner=False)
 def build_department_index():
     """
-    在網頁首次啟動時，自動遞迴掃描整個資料夾，
-    將所有科系的檔案路徑建立成快取字典，避免重複執行 os.walk。
+    網頁啟動時，自動掃描 GitHub 專案內隨附的『高科大各科系修課規範』資料夾，
+    將所有科系的 PDF 檔案路徑建立成快取索引。
     """
-    base_path = '/content/drive/MyDrive/高科大各科系修課規範'
+    # 🎯 關鍵修改：將路徑改為當前目錄下的相對路徑（因為檔案就在 GitHub 專案裡）
+    base_path = './高科大各科系修課規範'
     index = {}
     
     if not os.path.exists(base_path):
         return index
 
-    # 只在首次啟動時遍歷一次
     for root, dirs, files in os.walk(base_path):
         for f in files:
             if f.endswith('.pdf'):
-                # 萃取科系關鍵字作為 Key (例如: "工業工程與管理系")
-                # 這樣一來，不論檔名開頭是學院還是科系，都能精準匹配
                 found_dept = None
                 for college, depts in NKUST_DEPARTMENTS.items():
                     for d in depts:
@@ -43,7 +41,7 @@ def extract_text_from_pdf(file_path):
         text = ""
         with open(file_path, 'rb') as f:
             reader = PyPDF2.PdfReader(f)
-            # 優化：若檔案過大，限制讀取前 5 頁，避免 token 爆炸與時間過長
+            # 限制讀取前 5 頁，避免 token 爆炸與時間過長
             pages_to_read = min(len(reader.pages), 5)
             for i in range(pages_to_read):
                 text += reader.pages[i].extract_text() or ""
@@ -51,21 +49,19 @@ def extract_text_from_pdf(file_path):
     except Exception as e:
         return f"(檔案讀取失敗: {e})"
 
-# 使用 cache_data 快取讀取後的文字，同一個科系被重複查詢時秒開
 @st.cache_data(show_spinner=False)
 def get_department_requirements_optimized(target_dept, _file_index):
     """
-    利用預先建立好的索引直接提取路徑，徹底擺脫 os.walk。
+    利用預先建立好的索引直接提取路徑。
     """
     if not _file_index or target_dept not in _file_index:
-        # 特殊系所防呆處理
         if "車輛" in target_dept or "能源" in target_dept or "冷凍" in target_dept:
             return f"【教務系統提示】該系未訂定獨立輔系標準。依據高瞻系規，AI 將依據該系的『專業必修科目結構表』進行審查，該生需修讀該系專業必修科目達 20 學分以符合學位授予資格。"
         return "未找到該系的具體科目表檔案，建議依據校級輔系通則(20學分)進行規劃。"
     
     found_files = _file_index[target_dept]
     
-    # 權重邏輯：優先採用「輔系應修科目表」
+    # 優先採用「輔系應修科目表」
     selected_file = found_files[0]
     for path in found_files:
         if "輔系" in path:
@@ -76,21 +72,22 @@ def get_department_requirements_optimized(target_dept, _file_index):
     return f"{file_type_label}\n" + extract_text_from_pdf(selected_file)
 
 # =====================================================================
-# 2. Azure LLM 初始化與規範資料庫
+# 2. Azure LLM 初始化與金鑰管理（全面改用 Streamlit 內建 Secrets）
 # =====================================================================
 def get_azure_llm():
     try:
-        endpoint = os.getenv('AZURE_END_POINT', '').strip()
-        key = os.getenv('AZURE_API_KEY', '').strip()
-        version = os.getenv('AZURE_API_VERSION', '').strip()
+        # 🎯 關鍵修改：徹底移除 Colab 專用讀取，改用 Streamlit 標準的 st.secrets
+        endpoint = st.secrets.get("AZURE_END_POINT", "").strip()
+        key = st.secrets.get("AZURE_API_KEY", "").strip()
+        version = st.secrets.get("AZURE_API_VERSION", "").strip()
         
         if not endpoint or not key or not version:
-            st.error("❌ 背景環境變數讀取不完整，請確認 Colab 儲存格已成功同步 Secret。")
+            st.error("❌ 網頁環境變數讀取不完整，請確認 Streamlit Cloud 後台的 Secrets 有填寫正確。")
             return None
             
         return AzureChatOpenAI(
             azure_endpoint=endpoint,
-            azure_deployment="gpt-5.4", # <-- 請確保此處與你們 Azure 上的部署名稱完全相同
+            azure_deployment="gpt-35-turbo", # <-- 請確認此處與你們 Azure 上的部署名稱完全相同
             openai_api_key=key,
             openai_api_version=version,
             temperature=0.3
@@ -99,6 +96,9 @@ def get_azure_llm():
         st.error(f"❌ Azure 初始化時發生嚴重異常: {e}")
         return None
 
+# =====================================================================
+# 3. 高瞻科技不分系核心修課規範與資料庫
+# =====================================================================
 CORE_RULES = """
 【高瞻科技不分系修課核心規範】
 1. 畢業總學分：128 學分。
@@ -113,24 +113,28 @@ CORE_RULES = """
 
 NKUST_DEPARTMENTS = {
     "工學院": ["土木工程系", "工業工程與管理系", "化學工程與材料工程系", "營建工程系", "環境與安全衛生工程系"],
+    "電機與資訊學院": ["電機工程系", "電子工程系", "資訊工程系", "電子工程系（第一校區）", "電腦與通訊工程系", "半導體工程系"],
     "智慧機電學院": ["車輛工程系", "能源與冷凍空調工程系", "模具工程系", "機械工程系", "機電工程系"],
     "水圈學院": ["水產食品科學系", "水產養殖系", "海洋生物技術系", "海洋環境工程系", "漁業科技與管理系"],
     "外語學院": ["應用日語系", "應用英語系", "應用德語系"],
     "海事學院": ["海事資訊科技系", "航運技術系", "造船及海洋工程系", "電訊工程系", "輪機工程系"],
-    "管理學院": ["人力資源發展系", "企業管理系", "行銷與流通管理系", "金融系", "風險管理與保險系", "財務管理系", "國際企業系", "資訊管理系", "運籌管理系"]
+    "管理學院": ["人力資源發展系", "企業管理系", "行銷與流通管理系", "金融系", "風險管理與保險系", "財務管理系", "國際企業系", "資訊管理系", "運籌管理系"],
+    "商業智慧學院": ["會計資訊系", "金融資訊系", "財政稅務系", "觀光管理系", "智慧商務系"],
+    "海洋商務學院": ["航運管理系", "商務資訊應用系", "供應鏈管理系", "海洋休閒管理系"],
+    "創新設計學院": ["文化創意產業系", "工業設計系"] 
 }
 
 # =====================================================================
-# 3. UI 介面佈局與資料初始化
+# 4. UI 介面佈局與資料初始化
 # =====================================================================
-st.set_page_config(page_title="高科大不分系選課導航", layout="wide")
-st.title("🎓 高瞻科技不分系選課導航家 (極速快取優化版)")
+st.set_page_config(page_title="高科大不分系選課導航", layout="wide", page_icon="🎓")
+st.title("🎓 高瞻科技不分系選課導航家 (雲端永久運行版)")
 
-# 在背景建立索引（使用者完全不會感覺到卡頓）
+# 在背景建立索引
 file_index = build_department_index()
 
 if not file_index:
-    st.warning("⚠️ 系統目前未偵測到雲端硬碟規範檔案，將採用法規通則進行規劃。請確認雲端硬碟已成功掛載。")
+    st.warning("⚠️ 系統目前未偵測到隨附的修課規範檔案，將採用法規通則進行規劃。請確認『高科大各科系修課規範』資料夾是否已成功上傳至 GitHub 倉庫的最外層。")
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -143,10 +147,9 @@ with col3:
 if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
     llm = get_azure_llm()
     if not llm:
-        st.error("無法啟動 Azure OpenAI 模型，請檢查 Secret 與環境變數設定。")
+        st.error("無法啟動 Azure OpenAI 模型，請檢查 Streamlit Cloud 後台的 Secrets 設定。")
     else:
-        # 優化：利用記憶體快取秒讀內容，spinner 轉一瞬間就會進到 LLM 生成
-        with st.spinner("正在調閱修課規範檔案中..."):
+        with st.spinner("正在調閱專案附隨之修課規範檔案並進行規劃中..."):
             extracted_content = get_department_requirements_optimized(selected_dept, file_index)
             
             prompt = f"""你是一位高科大的資深教務導師。請針對『高瞻科技不分系學士學位學程』的同學進行大學四年的完整修課路徑規劃與畢業學分審查建議。
@@ -155,7 +158,7 @@ if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
 【高瞻不分系核心修課規範與畢業審查要點】：
 {CORE_RULES}
 
-【系統從雲端硬碟中精準檢索到的『{selected_dept}』最新修課規範文件內容】：
+【系統從隨附文件中精準檢索到的『{selected_dept}』最新修課規範文件內容】：
 {extracted_content}
 
 請根據上述提供的具體規範與文件，進行全方位的交叉比對與修課安排：
