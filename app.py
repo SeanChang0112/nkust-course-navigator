@@ -84,7 +84,7 @@ def get_azure_llm():
             
         return AzureChatOpenAI(
             azure_endpoint=endpoint,
-            azure_deployment="gpt5.4", 
+            azure_deployment="gpt-5.4", 
             openai_api_key=key,
             openai_api_version=version,
             temperature=0.3
