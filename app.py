@@ -4,14 +4,14 @@ from langchain_openai import AzureChatOpenAI
 import PyPDF2
 
 # =====================================================================
-# 1. 核心功能：直接讀取 GitHub 最外層平鋪的 PDF 規範檔案 (雙口袋索引)
+# 1. 核心功能：雙口袋索引機制 (輔系表與課規表同時提取)
 # =====================================================================
 
 @st.cache_data(show_spinner=False)
 def build_department_index():
     """
     掃描 GitHub 根目錄，將檔案精準分類為「輔系表」與「課規表」，
-    徹底解決多檔案混淆導致 AI 讀錯的問題。
+    讓系統可以同時撈出兩份檔案餵給 AI。
     """
     base_path = '.' 
     index = {} 
@@ -43,6 +43,7 @@ def extract_text_from_pdf(file_path):
         text = ""
         with open(file_path, 'rb') as f:
             reader = PyPDF2.PdfReader(f)
+            # 限制讀取前 5 頁核心課表內容
             pages_to_read = min(len(reader.pages), 5)
             for i in range(pages_to_read):
                 text += reader.pages[i].extract_text() or ""
@@ -50,24 +51,31 @@ def extract_text_from_pdf(file_path):
     except Exception as e:
         return f"(檔案讀取失敗: {e})"
 
-@st.cache_data(show_spinner=False)
-def get_department_requirements_optimized(target_dept, _file_index):
+def get_department_bundle(target_dept, _file_index):
+    """
+    同時讀取輔系應修科目表與課程規劃表，打包成超大文本餵給 AI。
+    """
     if not _file_index or target_dept not in _file_index:
         if "車輛" in target_dept or "能源" in target_dept or "冷凍" in target_dept:
-            return f"【教務系統提示】該系未訂定獨立輔系標準。依據高瞻系規，AI 將依據該系的『專業必修科目結構表』進行審查，該生需修讀該系專業必修科目達 20 學分以符合學位授予資格。"
+            return "【教務系統提示】該系未訂定獨立輔系標準。依據高瞻系規，AI 將依據該系的『專業必修科目結構表』進行審查，該生需修讀該系專業必修科目達 20 學分以符合學位授予資格。"
         return "【系統提示】未找到該系的具體科目表檔案，系統目前將採用校級通則進行合規性規劃。"
     
-    dept_files = _file_index[target_dept]
+    info = _file_index[target_dept]
+    bundle_text = ""
     
-    if dept_files["minor"]:
-        file_path = dept_files["minor"]
-        return f"【系統已精準調閱輔系應修科目表：{os.path.basename(file_path)}】\n\n" + extract_text_from_pdf(file_path)
-    
-    elif dept_files["major"]:
-        file_path = dept_files["major"]
-        return f"【系統已精準調閱課程規劃表：{os.path.basename(file_path)}】\n\n" + extract_text_from_pdf(file_path)
+    # 1. 讀取輔系表
+    if info["minor"]:
+        bundle_text += f"--- 【文件 A：輔系應修科目表 (真實檔名: {os.path.basename(info['minor'])})】 ---\n"
+        bundle_text += extract_text_from_pdf(info["minor"]) + "\n\n"
+    else:
+        bundle_text += "--- 【文件 A：輔系應修科目表】 --- (該系未訂定獨立輔系標準，改由專業必修審查)\n\n"
         
-    return "【系統提示】未找到該系的具體科目表檔案，系統目前將採用校級通則進行合規性規劃。"
+    # 2. 讀取課程規劃表
+    if info["major"]:
+        bundle_text += f"--- 【文件 B：全系各年級完整課程規劃表 (真實檔名: {os.path.basename(info['major'])})】 ---\n"
+        bundle_text += extract_text_from_pdf(info["major"]) + "\n\n"
+        
+    return bundle_text
 
 # =====================================================================
 # 2. Azure LLM 初始化與金鑰管理
@@ -84,7 +92,7 @@ def get_azure_llm():
             
         return AzureChatOpenAI(
             azure_endpoint=endpoint,
-            azure_deployment="gpt-5.4", 
+            azure_deployment="gpt-5.4", # <-- 💡 請確保此處與你們 Azure 上的部署名稱 100% 一致 (例如 gpt35 或 gpt-35-turbo)
             openai_api_key=key,
             openai_api_version=version,
             temperature=0.3
@@ -94,7 +102,7 @@ def get_azure_llm():
         return None
 
 # =====================================================================
-# 3. 高科大各學院科系資料庫與「50學分極致清晰版」規範 (優化重點)
+# 3. 高科大各學院科系資料庫
 # =====================================================================
 NKUST_DEPARTMENTS = {
     "工學院": ["土木工程系", "工業工程與管理系", "化學工程與材料工程系", "營建工程系", "環境與安全衛生工程系"],
@@ -109,7 +117,6 @@ NKUST_DEPARTMENTS = {
     "創新設計學院": ["文化創意產業系", "工業設計系"] 
 }
 
-# 🎯 這裡進行了精準的條款重寫，明確約束 50 學分的內部配置 (20 + 30 規則)
 CORE_RULES = """
 【高瞻科技不分系修課核心規範】
 1. 畢業總學分：128 學分。
@@ -117,12 +124,9 @@ CORE_RULES = """
 3. 語言門檻：需修滿 8 學分並達 CEFR B1 程度。多益 550 以上免修大一英語；785 以上免修大一、二英語。
 4. 模組規定：資料科學、數位藝術、海洋科技、機器人模組擇一修滿 12 學分。
 5. 畢業必要條件：必須選擇「出國交換研修」或修畢「暑期實習」或「學期實習(一/二)」或「專案實習」並取得學分。
-6. 【超級硬性規定】學院選修 50 學分的精準結構拆解如下：
-   - 學生必須在目標學院內修滿【50學分】（共同教育學院除外）。
-   - 核心錨定(至少20學分)：學生必須指定該學院中的「任一目標科系」，並修滿該科系之「輔系課程至少 20 學分」。
-   - 特殊例外：若該目標科系未訂定輔系標準（例如：車輛工程系、能源與冷凍空調系），則改為修滿該科系的「專業必修課程至少 20 學分」。
-   - 剩餘院內游擊(餘下30學分)：扣除上述特定系的 20 學分後，剩下的【30學分】，學生可以自由選修「該學院內任一系所」開設的任何專業課程來湊滿。
-   - 滿足以上條件，畢業時方可授予該學院該學系所屬之學士學位。
+6. 【學院選修 50 學分精準內部配置 (20 + 30 規則)】：
+   - 錨定特定系 (20 學分)：必須修滿目標科系之「輔系課程至少 20 學分」（若該系無輔系表，則修該系專業必修 20 學分）。
+   - 院內超前部署自由選 (30 學分)：剩下的 30 學分，學生應利用自身的修課空檔，盡可能提前選修該目標科系「課程規劃表」上所開設的其他專業必修或核心選修課程（即那些沒有被列在輔系表上、但出現在各年級課程規劃表中的系專業課），以此來填滿這 30 學分，達成深度專業化。
 """
 
 # =====================================================================
@@ -146,22 +150,25 @@ if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
     if not llm:
         st.error("無法啟動 Azure OpenAI 模型，請檢查 Streamlit Cloud 後台的 Secrets 設定。")
     else:
-        with st.spinner("正在依據 50+20 核心法規與隨附檔案進行極速選課規劃中..."):
-            extracted_content = get_department_requirements_optimized(selected_dept, file_index)
+        with st.spinner("正在執行雙文件深度交叉檢索並編排高精準度四年選課路徑中..."):
+            # 同時抓取輔系表和課程規劃表的文字內容
+            extracted_bundle = get_department_bundle(selected_dept, file_index)
             
             prompt = f"""你是一位高科大的資深教務導師。請針對『高瞻科技不分系學士學位學程』的同學進行大學四年的完整修課路徑規劃與畢業學分審查建議。
 使用者目前設定之目標：專長模組選擇「{selected_module}」，並期望依據法規取得「{selected_dept}」之學士學位。
 
-【高瞻不分系核心修課規範與畢業審查要點（⚠️請嚴格遵守第6點之 50 = 20 + 30 的學分拆解規則）：】
+【高瞻不分系核心修課規範與畢業審查要點（⚠️請特別注意 50 = 20 + 30 的院內超前部署規則）：】
 {CORE_RULES}
 
-【系統精準檢索到的目標系所規範文件內容（請依據此文件內列出的具體科目進行排課）：】
-{extracted_content}
+【系統為您精準調閱的『{selected_dept}』雙份規範文件內容（內含輔系科目與各年級完整課程規劃）：】
+{extracted_bundle}
 
-請根據上述提供的具體規範與文件，進行全方位的交叉比對與修課安排：
-1. 畢業學分組成結構：精確說明該生如何滿足 128 總學分（包含專業必修 25、模組選修 12、學院選修 50、自行選修 13、校訂必修與通識 28）。
-2. 【核心重點】學院選修 50 學分的具體實踐配比：明確向學生列出，在學院選修的 50 學分中，哪【20學分】是用來修讀「{selected_dept}」的輔系課（或專業必修課），並具體列出該系隨附文件中的科目名稱；另外剩下的【30學分】該院內自由選修課程，建議可以修讀哪些相關系所的課程。
-3. 四年修課路徑發展建議：具體列出大一至大四各學年的修課策略，必須將該生選擇的「{selected_module}」核心課程、特定科系的 20 學分核心課、以及院內其餘 30 學分的游擊課完美融合進各年級的排課中。
+請根據上述提供的具體規範與雙份文件，進行全方位的交叉比對與修課安排：
+1. 畢業學分組成結構：精確說明該生如何滿足 128 總學分。
+2. 【核心排課優化重點】學院選修 50 學分的精準開課對齊：
+   - 請明確區分出哪【20學分】是精準對齊【文件 A：輔系表】所列出的必修科目。
+   - 請深入翻閱【文件 B：課程規劃表】，挑選出那些『沒有寫在輔系表、但屬於該系大一到大四的重要專業課程』，並強烈建議學生利用空檔修讀這些課，以此來填滿剩下的【30學分】學院選修！必須具體列出這些課被安排在哪些年級與學期。
+3. 四年修課路徑發展建議：具體列出大一至大四各學年的修課策略表。請將不分系專業必修(25學分)、「{selected_module}」核心課(12學分)、特定系的20學分輔系課、以及從課程規劃表超前部署挑選出的30學分系專業課，完美且合乎邏輯地交織融入各年級的排課中（注意先修課程的邏輯順序，例如統計學要在作業研究前面）。
 4. 多元選修與語言門檻提醒：針對實習/出國交換的硬性畢業條件，以及多益免修學分或補課的機制，給予具體的執行時程建議。
 
 請使用繁體中文，以專業、詳盡且對學生充滿鼓勵的親切語氣回答。"""
