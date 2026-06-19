@@ -1,3 +1,4 @@
+# 組長：C113196110 張澄享/組員：C113196122 余書卉
 import os
 import streamlit as st
 from langchain_openai import AzureChatOpenAI
