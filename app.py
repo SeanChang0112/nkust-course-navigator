@@ -124,7 +124,7 @@ CORE_RULES = """
 # 4. UI 介面佈局與資料初始化
 # =====================================================================
 st.set_page_config(page_title="高科大不分系選課導航", layout="wide", page_icon="🎓")
-st.title("🎓 高瞻科技不分系選課導航家 ")
+st.title("🎓 高瞻科技不分系選課導航家")
 
 file_index = build_department_index()
 
@@ -149,4 +149,81 @@ if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
             extracted_bundle = get_department_bundle(selected_dept, file_index)
             
             prompt = f"""你充當高科大的資深教務專家，擅長精簡、清晰、無重複性的結構化排課建議。請針對『高瞻科技不分系』的同學，量身打造一份大學四年的精密修課清冊。
-學生目標：專長模組選擇
+學生目標：專長模組選擇「{selected_module}」，目標取得「{selected_dept}」學位。
+
+【不分系修課核心規範（50 = 20 + 30 拆解）：】
+{CORE_RULES}
+
+【精準調閱的『{selected_dept}』原始檔案文本內容：】
+{extracted_bundle}
+
+請嚴格遵守以下「不重複、全表格」的統整規則進行輸出，拒絕任何囉唆、重複的囉唆文字：
+
+一、 🎯 畢業審查學分結構簡表 (請使用 Markdown 表格呈現，一目了然)
+必須包含：不分系專業必修(25)、專長模組({selected_module} 12)、學院選修({selected_dept} 輔系核心20 + 該院超前部署30 = 50)、自行選修(13)、通識與校訂必修(28)，總計128學分。
+
+二、 📋 學院選修 50 學分精準配比清冊 (嚴格查核、禁止科目重複！)
+1. 錨定特定系【20學分】：必須精確萃取自【文件 A：輔系表】中的科目。
+2. 院內超前部署【30學分】：必須精確萃取自【文件 B：課程規劃表】大一至大四的核心專業課。⚠️【鐵律：此處列出的科目絕對不能與上述20學分的輔系課重複！】
+
+三、 📅 大一至大四「每學年」精密修課規劃表 (請用四個 Markdown 表格分別呈現各年級)
+每個年級的表格欄位必須為：【學期】|【課程名稱】|【學分數】|【課程屬性分類】|【科目資料來源】
+
+四、 💡 多元畢業門檻與實習時程建議 (請精簡條列)
+
+請使用繁體中文，拒絕重複內容，直接切入核心結構化輸出。"""
+            
+            res = llm.invoke(prompt)
+            st.session_state["plan_output"] = res.content
+
+# 渲染已經生成的規劃結果
+if st.session_state["plan_output"]:
+    st.success(f"### 🎯 {selected_dept} 專屬導航規劃已生成")
+    st.markdown(st.session_state["plan_output"])
+
+    # =====================================================================
+    # 🆕 新增功能：高科大課程大師 AI 即時問答區
+    # =====================================================================
+    st.markdown("---")
+    st.markdown("### 💬 高科大選課疑難排解大師")
+    st.caption("您可以輸入任何關於高科大選課、修課難易度、各科系出路或排課順序的問題，AI 將結合上傳檔案與高科大校園網路資訊為您詳盡解答。")
+    
+    user_question = st.text_input("💡 請輸入您的選課規劃相關問題：", placeholder="例如：請問工管系的作業研究主要在學什麼？先修科目是什麼？或是出路如何？")
+    
+    if st.button("❓ 詢問 AI 導師", use_container_width=True):
+        if not user_question.strip():
+            st.warning("請先輸入問題再進行詢問喔！")
+        else:
+            llm = get_azure_llm()
+            if llm:
+                with st.spinner("正在聯網檢索高科大相關課程資訊並綜整答覆中..."):
+                    # 💡 透過 System Prompt 約束，強迫 AI 啟動內建的知識檢索功能並鎖定高科大（NKUST）
+                    qa_prompt = f"""你現在是國立高雄科技大學（高科大 NKUST）的教務長與選課輔導大師。
+現在不分系學生在看完了上述的四年選課規劃表格後，提出了以下關於課程規劃或科系發展的具體疑問。
+
+【學生提出的選課疑問】：
+「{user_question}」
+
+【你的輔導鐵律】：
+1. 務必針對「國立高雄科技大學（高科大）」的校園現況、教學大綱、開課邏輯（如建工校區、第一校區、楠梓校區的特色與移動）進行回答。
+2. 請主動運用你內建的網路檢索與高科大校園知識庫，提供與高科大最相關、最新、最正確的課程大綱、學分要求、就業出路或修課建議。
+3. 語氣請保持親切、專業、客觀且充滿鼓勵，協助不分系學生順利解決排課疑惑。
+
+請直接給出結構清晰、統整性高且完整的繁體中文解答："""
+                    
+                    qa_res = llm.invoke(qa_prompt)
+                    st.info("### 📝 AI 導師回覆與高科大課程網綜合建議：")
+                    st.markdown(qa_res.content)
+
+# =====================================================================
+# 5. 系統後台偵錯面板 
+# =====================================================================
+st.markdown("---")
+with st.expander("🔍 系統後台環境與檔案分流偵測面板 (除錯專用)"):
+    st.write(f"**目前選擇科系：** `{selected_dept}`")
+    if selected_dept in file_index:
+        info = file_index[selected_dept]
+        st.write(f"📂 該系配對到的【輔系表】：`{os.path.basename(info['minor']) if info['minor'] else '❌ 無'}`")
+        st.write(f"📂 該系配對到的【課規表】：`{os.path.basename(info['major']) if info['major'] else '❌ 無'}`")
+    else:
+        st.error("❌ 系統在根目錄中完全找不到與該科系匹配的 PDF 檔案。")
