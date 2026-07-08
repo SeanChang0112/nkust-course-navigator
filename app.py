@@ -196,7 +196,7 @@ if st.session_state["plan_output"]:
         else:
             llm = get_azure_llm()
             if llm:
-                with st.spinner("正在聯網檢索高科大相關課程資訊並綜整答覆中..."):
+                with st.spinner("正在搜尋高科大相關課程資訊並綜整答覆中..."):
                     # 💡 透過 System Prompt 約束，強迫 AI 啟動內建的知識檢索功能並鎖定高科大（NKUST）
                     qa_prompt = f"""你現在是國立高雄科技大學（高科大 NKUST）的教務長與選課輔導大師。
 現在不分系學生在看完了上述的四年選課規劃表格後，提出了以下關於課程規劃或科系發展的具體疑問。
