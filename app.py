@@ -86,7 +86,7 @@ def get_azure_llm():
             azure_deployment="gpt-5.4", # <-- 💡 請確保此處與你們 Azure 上的部署名稱 100% 一致
             openai_api_key=key,
             openai_api_version=version,
-            temperature=0.2 
+            temperature=0.3
         )
     except Exception as e:
         st.error(f"❌ Azure 初始化嚴重異常: {e}")
@@ -124,7 +124,7 @@ CORE_RULES = """
 # 4. UI 介面佈局與資料初始化
 # =====================================================================
 st.set_page_config(page_title="高科大不分系選課導航", layout="wide", page_icon="🎓")
-st.title("🎓 高瞻科技不分系選課導航家 (雲端永久運行版)")
+st.title("🎓 高瞻科技不分系選課導航家 (雲端問答運行版)")
 
 file_index = build_department_index()
 
@@ -136,101 +136,17 @@ with col2:
 with col3:
     selected_dept = st.selectbox("選擇目標輔系科系：", NKUST_DEPARTMENTS[selected_college])
 
-# 使用 st.tabs 將「全方位路徑規劃」與「自由提問諮詢室」分開，介面更乾淨專業
-tab1, tab2 = st.tabs(["📊 四年全方位排課清冊", "💬 課務諮詢 AI 線上互動視窗"])
+# 使用 Session State 來記錄規劃結果，防止互動問答時網頁重整消失
+if "plan_output" not in st.session_state:
+    st.session_state["plan_output"] = None
 
-with tab1:
-    if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
-        llm = get_azure_llm()
-        if not llm:
-            st.error("無法啟動 Azure OpenAI 模型，請檢查 Streamlit Cloud 後台的 Secrets 設定。")
-        else:
-            with st.spinner("正在優化結構、消除重複文字，並編排精準四年選課清冊中..."):
-                extracted_bundle = get_department_bundle(selected_dept, file_index)
-                
-                prompt = f"""你充當高科大的資深教務專家，擅長精簡、清晰、無重複性的結構化排課建議。請針對『高瞻科技不分系』的同學，量身打造一份大學四年的精密修課清冊。
-學生目標：專長模組選擇「{selected_module}」，目標取得「{selected_dept}」學位。
-
-【不分系修課核心規範（50 = 20 + 30 拆解）：】
-{CORE_RULES}
-
-【精準調閱的『{selected_dept}』原始檔案文本內容：】
-{extracted_bundle}
-
-請嚴格遵守以下「不重複、全表格」的統整規則進行輸出，拒絕任何囉唆、重複的囉唆文字：
-
-一、 🎯 畢業審查學分結構簡表 (請使用 Markdown 表格呈現)
-必須包含：不分系專業必修(25)、專長模組({selected_module} 12)、學院選修({selected_dept} 輔系核心20 + 該院超前部署30 = 50)、自行選修(13)、通識與校訂必修(28)，總計128學分。
-
-二、 📋 學院選修 50 學分精準配比清冊 (嚴格查核、禁止科目重複！)
-1. 錨定特定系【20學分】：必須精確萃取自【文件 A：輔系表】中的科目。
-2. 院內超前部署【30學分】：必須精確萃取自【文件 B：課程規劃表】核心專業課。⚠️【鐵律：此處列出的科目絕對不能與上述20學分的輔系課重複！】
-
-三、 📅 大一至大四「每學年」精密修課規劃表 (請用四個 Markdown 表格分別呈現各年級)
-欄位必須為：【學期】|【課程名稱】|【學分數】|【課程屬性分類】|【科目資料來源】
-* 課程屬性分類：不分系必修 / 專長模組課 / 院選修-錨定特定系 / 院選修-超前部署 / 校訂通識
-* 科目資料來源：高瞻系規 / 文件A(輔系表) / 文件B(課規表) / 通識中心
-
-四、 💡 多元畢業門檻與實習時程建議 (請精簡條列)
-
-請使用繁體中文，拒絕重複內容，直接切入核心結構化輸出。"""
-                
-                res = llm.invoke(prompt)
-                st.success(f"### 🎯 {selected_dept} 專專屬導航規劃已生成")
-                st.markdown(res.content)
-
-with tab2:
-    st.subheader(f"💬 {selected_dept} 課務專屬諮詢室")
-    st.write("同學你好！你可以針對該科系的修課細節、課程規劃或學分認定在此提出具體問題，AI 將為你調閱上傳的 PDF 檔案進行精準解答。")
-    
-    # 建立輸入框供學生輸入客製化問題
-    user_question = st.text_input(
-        "請輸入你的課務或選課疑問：", 
-        placeholder=f"例如：請問{selected_dept}有哪些推薦的超前部署課程？或是某某課有先修限制嗎？",
-        key="dept_qa_input"
-    )
-    
-    if st.button("🔍 送出提問", use_container_width=True):
-        if not user_question.strip():
-            st.warning("請先輸入您的問題後再點擊送出。")
-        else:
-            llm = get_azure_llm()
-            if not llm:
-                st.error("無法啟動 Azure OpenAI 模型。")
-            else:
-                with st.spinner("正在為您翻閱該系所的規範檔案並組織建議中..."):
-                    extracted_bundle = get_department_bundle(selected_dept, file_index)
-                    
-                    # 專門為學生個人問題設計的 QA Prompt
-                    qa_prompt = f"""你是一位高科大不分系的權威教務導師。現在有一位同學針對他未來想修讀的「{selected_dept}」提出了具體選課疑問。
-請務必根據隨附的高瞻不分系核心規章以及該科系的兩份真實文件內容（輔系表與課程規劃表）來回答，切勿胡言亂語。
-
-【不分系修課核心規範：】
-{CORE_RULES}
-
-【系統調閱的『{selected_dept}』規範文件內容（包含輔系課表與完整課程規劃）：】
-{extracted_bundle}
-
----
-【學生的具體提問】：
-「{user_question}」
----
-
-請依據上述法規與文件文本，用清晰、專業且對學生充滿耐心的語氣，針對學生的問題給予具體且精準的回答與選課修課建議。如果檔案中有提到相關科目、學分數或年級，請務必精確列出。"""
-                    
-                    qa_res = llm.invoke(qa_prompt)
-                    st.info("### 📋 AI 導師的精準回覆與建議：")
-                    st.markdown(qa_res.content)
-
-# =====================================================================
-# 5. 系統後台偵錯面板 
-# =====================================================================
-st.markdown("---")
-with st.expander("🔍 系統後台環境與檔案分流偵測面板 (除錯專用)"):
-    st.write(f"**目前選擇科系：** `{selected_dept}`")
-    if selected_dept in file_index:
-        info = file_index[selected_dept]
-        st.write(f"📂 該系配對到的【輔系表】：`{os.path.basename(info['minor']) if info['minor'] else '❌ 無'}`")
-        st.write(f"📂 該系配對到的【課規表】：`{os.path.basename(info['major']) if info['major'] else '❌ 無'}`")
+if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
+    llm = get_azure_llm()
+    if not llm:
+        st.error("無法啟動 Azure OpenAI 模型，請檢查 Streamlit Cloud 後台的 Secrets 設定。")
     else:
-        st.error("❌ 系統在根目錄中完全找不到與該科系匹配的 PDF 檔案。")
+        with st.spinner("正在優化結構、消除重複文字，並編排精準四年選課清冊中..."):
+            extracted_bundle = get_department_bundle(selected_dept, file_index)
+            
+            prompt = f"""你充當高科大的資深教務專家，擅長精簡、清晰、無重複性的結構化排課建議。請針對『高瞻科技不分系』的同學，量身打造一份大學四年的精密修課清冊。
+學生目標：專長模組選擇
