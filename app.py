@@ -148,7 +148,7 @@ if st.button("🚀 啟動 AI 全方位規劃", use_container_width=True):
         with st.spinner("正在優化結構、消除重複文字，並編排精準四年選課清冊中..."):
             extracted_bundle = get_department_bundle(selected_dept, file_index)
             
-            prompt = f"""你充當高科大的資深教務專家，擅長精簡、清晰、無重複性的結構化排課建議。請針對『高瞻科技不分系』的同學，量身打造一份大學四年的精密修課清冊。
+            prompt = f"""你充當高科大的資深教務專家，擅長精簡、清晰、無重複性的結構化排課建議。請務必審閱上傳資料並針對『高瞻科技不分系』的同學，量身打造一份大學四年的精密修課清冊。
 學生目標：專長模組選擇「{selected_module}」，目標取得「{selected_dept}」學位。
 
 【不分系修課核心規範（50 = 20 + 30 拆解）：】
