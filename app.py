@@ -68,7 +68,7 @@ def get_department_bundle(target_dept, _file_index):
         major_text = extract_text_from_pdf(info["major"])
 
     # 🎯 終極防呆：如果文字吸不出來（小於50字），說明遇到圖片檔，直接由後台精準注入歷史課規數據
-    if len(minor_text.strip()) < 50 and "工業工程" in target_dept:
+    if len(minor_text.strip()) < 50 and "工業工程與管理系" in target_dept:
         minor_text = """
         【工業工程與管理系 輔系必修核心科目（20學分錨定）】：
         - 工業工程概論 (2學分，大一)
@@ -80,7 +80,7 @@ def get_department_bundle(target_dept, _file_index):
         - 工作研究 (3學分，大二)
         """
         
-    if len(major_text.strip()) < 50 and "工業工程" in target_dept:
+    if len(major_text.strip()) < 50 and "工業工程與管理系" in target_dept:
         major_text = """
         【工業工程與管理系 完整課程規劃表核心專業科目（30學分院內自由選）】：
         - 大一：工程圖學(2學分)、計算機程式(3學分)
